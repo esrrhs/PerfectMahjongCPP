@@ -23,6 +23,7 @@
 *.dll
 *.so.*
 
+
 # Fortran module files
 *.mod
 *.smod
@@ -42,6 +43,7 @@
 build/
 Build/
 build-*/
+build_*/
 
 # CMake generated files
 CMakeFiles/
@@ -66,3 +68,15 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+ckpt/
+ckpt_*/
+models/
+eval_runs/
+logs/
+third_party/
+__pycache__/
+*.pyc
+
+
+# WorkBuddy 工作空间记忆（本地）
+.workbuddy/
