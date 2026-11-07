@@ -25,50 +25,80 @@ int computeShanten13(const TileCounts& counts,
         return 6;
     }
 
-    int bestShanten = std::numeric_limits<int>::max();
-    std::array<bool, kNumTileTypes> bestUseful{};
+    int sReg = mahjong::regular_shanten(standing, n, nullptr);
+    int bestShanten = sReg;
 
-    auto considerForm = [&](int s, const mahjong::useful_table_t& ut) {
-        if (s < bestShanten) {
-            bestShanten = s;
-            if (usefulOut) {
-                for (int i = 0; i < kNumTileTypes; ++i) {
-                    bestUseful[i] = ut[mahjong::all_tiles[i]];
-                }
-            }
-        } else if (s == bestShanten && usefulOut) {
-            for (int i = 0; i < kNumTileTypes; ++i) {
-                if (ut[mahjong::all_tiles[i]]) bestUseful[i] = true;
-            }
-        }
-    };
-
-    mahjong::useful_table_t ut{};
-    std::memset(ut, 0, sizeof(ut));
-    int sReg = mahjong::regular_shanten(standing, n, usefulOut ? &ut : nullptr);
-    considerForm(sReg, ut);
-
+    int sKs = 99, s7p = 99, s13o = 99, sHk = 99;
     if (n == 13 || n == 10) {
-        std::memset(ut, 0, sizeof(ut));
-        int sKs = mahjong::knitted_straight_shanten(standing, n, usefulOut ? &ut : nullptr);
-        considerForm(sKs, ut);
+        sKs = mahjong::knitted_straight_shanten(standing, n, nullptr);
+        bestShanten = std::min(bestShanten, sKs);
     }
-
     if (n == 13) {
-        std::memset(ut, 0, sizeof(ut));
-        int s7p = mahjong::seven_pairs_shanten(standing, n, usefulOut ? &ut : nullptr);
-        considerForm(s7p, ut);
-
-        std::memset(ut, 0, sizeof(ut));
-        int s13o = mahjong::thirteen_orphans_shanten(standing, n, usefulOut ? &ut : nullptr);
-        considerForm(s13o, ut);
-
-        std::memset(ut, 0, sizeof(ut));
-        int sHk = mahjong::honors_and_knitted_tiles_shanten(standing, n, usefulOut ? &ut : nullptr);
-        considerForm(sHk, ut);
+        s7p = mahjong::seven_pairs_shanten(standing, n, nullptr);
+        s13o = mahjong::thirteen_orphans_shanten(standing, n, nullptr);
+        sHk = mahjong::honors_and_knitted_tiles_shanten(standing, n, nullptr);
+        bestShanten = std::min({bestShanten, s7p, s13o, sHk});
     }
 
     if (usefulOut) {
+        std::array<bool, kNumTileTypes> bestUseful{};
+        if (bestShanten <= 1) {
+            mahjong::useful_table_t ut{};
+            auto mergeUt = [&]() {
+                for (int i = 0; i < kNumTileTypes; ++i) {
+                    if (ut[mahjong::all_tiles[i]]) bestUseful[i] = true;
+                }
+            };
+            if (sReg == bestShanten) {
+                std::memset(ut, 0, sizeof(ut));
+                if (bestShanten == 0) {
+                    mahjong::is_regular_wait(standing, n, &ut);
+                } else {
+                    mahjong::regular_shanten(standing, n, &ut);
+                }
+                mergeUt();
+            }
+            if ((n == 13 || n == 10) && sKs == bestShanten) {
+                std::memset(ut, 0, sizeof(ut));
+                mahjong::knitted_straight_shanten(standing, n, &ut);
+                mergeUt();
+            }
+            if (n == 13) {
+                if (s7p == bestShanten) {
+                    std::memset(ut, 0, sizeof(ut));
+                    mahjong::seven_pairs_shanten(standing, n, &ut);
+                    mergeUt();
+                }
+                if (s13o == bestShanten) {
+                    std::memset(ut, 0, sizeof(ut));
+                    mahjong::thirteen_orphans_shanten(standing, n, &ut);
+                    mergeUt();
+                }
+                if (sHk == bestShanten) {
+                    std::memset(ut, 0, sizeof(ut));
+                    mahjong::honors_and_knitted_tiles_shanten(standing, n, &ut);
+                    mergeUt();
+                }
+            }
+        } else {
+            // Fast O(34) useful tile detection for hands with shanten >= 2
+            for (int t = 0; t < kNumTileTypes; ++t) {
+                if (counts.c[t] >= 4) continue;
+                if (counts.c[t] >= 1) {
+                    bestUseful[t] = true;
+                    continue;
+                }
+                if (isSuited(t)) {
+                    int r = t % 9;
+                    if ((r >= 1 && counts.c[t - 1] > 0) ||
+                        (r >= 2 && counts.c[t - 2] > 0) ||
+                        (r <= 7 && counts.c[t + 1] > 0) ||
+                        (r <= 6 && counts.c[t + 2] > 0)) {
+                        bestUseful[t] = true;
+                    }
+                }
+            }
+        }
         *usefulOut = bestUseful;
     }
     return bestShanten == std::numeric_limits<int>::max() ? 6 : bestShanten;
@@ -85,32 +115,35 @@ int computeShanten(const TileCounts& standingCounts,
         return computeShanten13(standingCounts, usefulOut);
     }
     if (n == expected13 + 1) {
-        // 14-tile equivalent hand (right after drawing):
-        // Check if dropping any single tile leaves shanten == 0 with that tile in useful,
-        // which means the 14-tile hand is already complete (shanten == -1).
+        // Fast check if any tile completes the 14-tile hand
+        for (int t = 0; t < kNumTileTypes; ++t) {
+            if (standingCounts.c[t] > 0 && isCompleteHand(standingCounts, melds, t)) {
+                if (usefulOut) usefulOut->fill(false);
+                return -1;
+            }
+        }
         int minS = 6;
-        std::array<bool, kNumTileTypes> combinedUseful{};
+        int bestT = -1;
         TileCounts work = standingCounts;
         for (int t = 0; t < kNumTileTypes; ++t) {
             if (work.c[t] == 0) continue;
             work.c[t] -= 1;
-            std::array<bool, kNumTileTypes> subU{};
-            int s = computeShanten13(work, &subU);
-            if (s == 0 && subU[t]) {
-                if (usefulOut) usefulOut->fill(false);
-                return -1;
-            }
+            int s = computeShanten13(work, nullptr);
             if (s < minS) {
                 minS = s;
-                combinedUseful = subU;
-            } else if (s == minS) {
-                for (int i = 0; i < kNumTileTypes; ++i) {
-                    if (subU[i]) combinedUseful[i] = true;
-                }
+                bestT = t;
             }
             work.c[t] += 1;
         }
-        if (usefulOut) *usefulOut = combinedUseful;
+        if (usefulOut) {
+            if (bestT >= 0) {
+                work.c[bestT] -= 1;
+                computeShanten13(work, usefulOut);
+                work.c[bestT] += 1;
+            } else {
+                usefulOut->fill(false);
+            }
+        }
         return minS;
     }
     if (usefulOut) usefulOut->fill(false);

@@ -257,19 +257,28 @@ void workerBatch(const ModelSet& models, int nGames, int gameOffset, uint64_t se
                 tr.logp = std::log(pChosen);
                 tr.value = pValues[b];
 
-                float potBefore = 0.0f;
                 if (oracleReward) {
-                    potBefore = mcr::oraclePotentialAdvantage(games[gi], seat);
+                    // Use already-computed pre-action potential from st.enc.scalar and post-action from chosenOpt.feature
+                    float shantenBefore = st.enc.scalar[37] * 6.0f;
+                    float ukeireBefore = st.enc.scalar[40] * 34.0f;
+                    float waitsBefore = st.enc.scalar[41] * 16.0f;
+                    float structBefore = st.enc.scalar[43] * 10.0f;
+                    float potBefore = -shantenBefore + 0.02f * ukeireBefore +
+                                      0.15f * std::min(waitsBefore, 8.0f) + 0.05f * structBefore;
+
+                    float shantenAfter = chosenOpt.feature[86] * 6.0f;
+                    float ukeireAfter = chosenOpt.feature[89] * 34.0f;
+                    float waitsAfter = chosenOpt.feature[90] * 16.0f;
+                    float structAfter = chosenOpt.feature[92] * 10.0f;
+                    float potAfter = -shantenAfter + 0.02f * ukeireAfter +
+                                     0.15f * std::min(waitsAfter, 8.0f) + 0.05f * structAfter;
+
+                    float delta = std::clamp(potAfter - potBefore, -1.0f, 1.0f);
+                    tr.reward += oracleCoef * delta;
                 }
 
                 games[gi].step(chosenOpt.concrete);
                 moves[gi] += 1;
-
-                if (oracleReward && !games[gi].over) {
-                    float potAfter = mcr::oraclePotentialAdvantage(games[gi], seat);
-                    float delta = std::clamp(potAfter - potBefore, -1.0f, 1.0f);
-                    tr.reward += oracleCoef * delta;
-                }
 
                 traj[gi][seat].push_back(std::move(tr));
             }
